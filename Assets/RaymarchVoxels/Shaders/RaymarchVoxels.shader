@@ -111,20 +111,12 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             struct Attributes
             {
                 float4 positionOS : POSITION;
-                float3 normalOS : NORMAL;
-                float4 tangentOS : TANGENT;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
                 float4 positionWSAndFogFactor : TEXCOORD0; // xyz: positionWS, w: vertex fog factor
-                half3 normalWS : TEXCOORD1;
-
-                #ifdef _RECEIVE_SHADOWS
-                float4 shadowCoord : TEXCOORD6; // compute shadow coord per-vertex for the main light
-                #endif
-
                 float4 positionCS : SV_POSITION;
             };
 
@@ -137,28 +129,9 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 // Therefore there is more flexibility at no additional cost with this struct.
                 VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 
-                // Similar to VertexPositionInputs, VertexNormalInputs will contain normal, tangent and bitangent
-                // in world space. If not used it will be stripped.
-                VertexNormalInputs vertexNormalInput = GetVertexNormalInputs(input.normalOS, input.tangentOS);
-
                 // Computes fog factor per-vertex.
                 float fogFactor = ComputeFogFactor(vertexInput.positionCS.z);
-
-                // TRANSFORM_TEX is the same as the old shader library.
-                //output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                //output.uvLM = input.uvLM.xy * unity_LightmapST.xy + unity_LightmapST.zw;
-
                 output.positionWSAndFogFactor = float4(vertexInput.positionWS, fogFactor);
-                output.normalWS = vertexNormalInput.normalWS;
-
-                #ifdef _RECEIVE_SHADOWS
-                // shadow coord for the main light is computed in vertex.
-                // If cascades are enabled, LWRP will resolve shadows in screen space
-                // and this coord will be the uv coord of the screen space shadow texture.
-                // Otherwise LWRP will resolve shadows in light space (no depth pre-pass and shadow collect pass)
-                // In this case shadowCoord will be the position in light space.
-                output.shadowCoord = GetShadowCoord(vertexInput);
-                #endif
                 // We just use the homogeneous clip position from the vertex input
                 output.positionCS = vertexInput.positionCS;
                 return output;
@@ -168,22 +141,29 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             {
                 outSurfaceData.albedo = _BaseColor.rgb;
                 outSurfaceData.alpha = _BaseColor.a;
-
                 outSurfaceData.metallic = 1.0;
                 outSurfaceData.specular = _SpecColor.rgb;
-
                 outSurfaceData.smoothness = _Smoothness;
                 outSurfaceData.normalTS = half3(0.0, 0.0, 0.0);
                 outSurfaceData.occlusion = 1.0;
 
                 #ifndef _EMISSION
-                    outSurfaceData.emission = 0.0;
+                outSurfaceData.emission = 0.0;
                 #else
                 outSurfaceData.emission = _EmissionColor;;
                 #endif
 
                 outSurfaceData.clearCoatMask = 0.0;
                 outSurfaceData.clearCoatSmoothness = 0.0;
+            }
+
+            float4 GetVoxelShadowCoord(VertexPositionInputs vertexInput)
+            {
+                #if defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
+                return ComputeScreenPos(vertexInput.positionCS);
+                #else
+                return TransformWorldToShadowCoord(vertexInput.positionWS);
+                #endif
             }
 
             half4 Frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
@@ -240,14 +220,22 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 // so we can be as fast as possible in the case when there's only a single directional light
                 // You can pass optionally a shadowCoord (computed per-vertex). If so, shadowAttenuation will be
                 // computed.
+                float3 voxelPositionWs = TransformObjectToWorld(voxelPosition);
+
                 #ifdef _RECEIVE_SHADOWS
-                Light mainLight = GetMainLight(input.shadowCoord);
+
+                #if defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
+                float4 shadowCoord = ComputeScreenPos(TransformObjectToHClip(voxelPosition));
+                #else
+                float4 shadowCoord = TransformWorldToShadowCoord(voxelPositionWs);
+                #endif
+
+                Light mainLight = GetMainLight(shadowCoord);
                 #else
                 Light mainLight = GetMainLight();
                 #endif
 
                 half3 viewDirectionWS = SafeNormalize(worldSpaceViewerPos - positionWS);
-                float3 voxelPositionWs = TransformObjectToWorld(voxelPosition);
 
                 // Mix diffuse GI with environment reflections.
                 half3 color = GlobalIllumination(brdfData, bakedGI, surfaceData.occlusion, normalWS, rayDirWorldSpace);
@@ -256,7 +244,6 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 color += LightingPhysicallyBased(brdfData, mainLight, normalWS, viewDirectionWS);
 
                 #ifdef _ADDITIONAL_LIGHTS
-
                 int additionalLightsCount = GetAdditionalLightsCount();
                 for (int i = 0; i < additionalLightsCount; ++i)
                 {
@@ -283,6 +270,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             ZWrite On
             ZTest LEqual
             Cull Front
+            
+            ColorMask 0
 
             HLSLPROGRAM
             #pragma shader_feature _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
@@ -318,13 +307,13 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
+                VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS);
                 output.positionWS = vertexInput.positionWS;
                 output.positionCS = vertexInput.positionCS;
                 return output;
             }
 
-            half4 Frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
+            float Frag(Varyings input) : SV_Depth
             {
                 float3 rayDirWorldSpace;
                 float3 rayOriginWorldSpace;
@@ -338,21 +327,12 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float3 voxelNormal;
                 float3 voxelPosition;
                 float voxelDepth;
-                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition,
-                               voxelDepth);
+                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition, voxelDepth);
 
-                outDepth = voxelDepth;
-                return outDepth;
+                return voxelDepth;
             }
             ENDHLSL
         }
-
-
-        // Used for depth prepass
-        // If shadows cascade are enabled we need to perform a depth prepass. 
-        // We also need to use a depth prepass in some cases camera require depth texture
-        // (e.g, MSAA is enabled and we can't resolve with Texture2DMS
-        //UsePass "Universal Render Pipeline/Lit/DepthOnly"
     }
 
     CustomEditor "RaymarchVoxels.RaymarchVoxelsShaderEditor"
