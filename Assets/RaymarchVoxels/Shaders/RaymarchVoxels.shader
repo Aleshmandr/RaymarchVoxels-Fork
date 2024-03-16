@@ -188,8 +188,15 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float4 voxelColor;
                 float3 voxelNormal;
                 float3 voxelPosition;
-                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition,
-                               outDepth);
+                
+                RaymarchVoxels(
+                    rayOriginObjectSpace,
+                    rayDirObjectSpace,
+                    voxels,
+                    voxelColor,
+                    voxelNormal,
+                    voxelPosition,
+                    outDepth);
 
                 surfaceData.albedo *= voxelColor.rgb;
                 surfaceData.emission *= voxelColor.rgb;
@@ -228,7 +235,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float4 shadowCoord = ComputeScreenPos(TransformObjectToHClip(voxelPosition));
                 #else
                 float3 biasedSC = ApplyShadowBias(voxelPositionWs, -voxelNormalWS, -_MainLightPosition.xyz);
-                float4 shadowCoord = TransformWorldToShadowCoord(biasedSC); 
+                float4 shadowCoord = TransformWorldToShadowCoord(biasedSC);
                 #endif
 
                 Light mainLight = GetMainLight(shadowCoord);
@@ -271,7 +278,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
 
             ZWrite On
             ZTest LEqual
-            Cull Front
+            Cull Off
 
             ColorMask 0
 
@@ -309,9 +316,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS);
-                output.positionWS = vertexInput.positionWS;
-                output.positionCS = vertexInput.positionCS;
+                output.positionWS = TransformObjectToWorld(input.positionOS);
+                output.positionCS = TransformWorldToHClip(output.positionWS);
                 return output;
             }
 
@@ -329,8 +335,16 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float3 voxelNormal;
                 float3 voxelPosition;
                 float voxelDepth;
-                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition,
-                               voxelDepth);
+                
+                RaymarchVoxels(
+                    rayOriginObjectSpace,
+                    rayDirObjectSpace,
+                    voxels,
+                    voxelColor,
+                    voxelNormal,
+                    voxelPosition,
+                    voxelDepth);
+
 
                 return voxelDepth;
             }
