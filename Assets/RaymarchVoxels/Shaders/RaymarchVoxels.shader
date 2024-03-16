@@ -194,12 +194,12 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 surfaceData.albedo *= voxelColor.rgb;
                 surfaceData.emission *= voxelColor.rgb;
 
-                half3 normalWS = TransformObjectToWorldNormal(voxelNormal);
-                normalWS = normalize(normalWS);
+                half3 voxelNormalWS = TransformObjectToWorldNormal(voxelNormal);
+                voxelNormalWS = normalize(voxelNormalWS);
 
                 // Samples SH fully per-pixel. SampleSHVertex and SampleSHPixel functions
                 // are also defined in case you want to sample some terms per-vertex.
-                half3 bakedGI = SampleSH(normalWS);
+                half3 bakedGI = SampleSH(voxelNormalWS);
 
                 //half3 viewDirectionWS = SafeNormalize(GetCameraPositionWS() - positionWS);
 
@@ -227,7 +227,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 #if defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
                 float4 shadowCoord = ComputeScreenPos(TransformObjectToHClip(voxelPosition));
                 #else
-                float4 shadowCoord = TransformWorldToShadowCoord(voxelPositionWs);
+                float3 biasedSC = ApplyShadowBias(voxelPositionWs, -voxelNormalWS, -_MainLightPosition.xyz);
+                float4 shadowCoord = TransformWorldToShadowCoord(biasedSC); 
                 #endif
 
                 Light mainLight = GetMainLight(shadowCoord);
@@ -238,17 +239,18 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 half3 viewDirectionWS = SafeNormalize(worldSpaceViewerPos - positionWS);
 
                 // Mix diffuse GI with environment reflections.
-                half3 color = GlobalIllumination(brdfData, bakedGI, surfaceData.occlusion, normalWS, rayDirWorldSpace);
+                half3 color = GlobalIllumination(brdfData, bakedGI, surfaceData.occlusion, voxelNormalWS,
+                                                 rayDirWorldSpace);
 
                 // LightingPhysicallyBased computes direct light contribution.
-                color += LightingPhysicallyBased(brdfData, mainLight, normalWS, viewDirectionWS);
+                color += LightingPhysicallyBased(brdfData, mainLight, voxelNormalWS, viewDirectionWS);
 
                 #ifdef _ADDITIONAL_LIGHTS
                 int additionalLightsCount = GetAdditionalLightsCount();
                 for (int i = 0; i < additionalLightsCount; ++i)
                 {
                     Light light = GetAdditionalLight(i, voxelPositionWs);
-                    color += LightingPhysicallyBased(brdfData, light, normalWS, rayDirWorldSpace);
+                    color += LightingPhysicallyBased(brdfData, light, voxelNormalWS, rayDirWorldSpace);
                 }
                 #endif
 
@@ -270,7 +272,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             ZWrite On
             ZTest LEqual
             Cull Front
-            
+
             ColorMask 0
 
             HLSLPROGRAM
@@ -327,7 +329,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float3 voxelNormal;
                 float3 voxelPosition;
                 float voxelDepth;
-                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition, voxelDepth);
+                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition,
+                               voxelDepth);
 
                 return voxelDepth;
             }
