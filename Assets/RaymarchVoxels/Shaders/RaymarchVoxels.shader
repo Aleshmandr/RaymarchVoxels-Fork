@@ -156,6 +156,23 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 outSurfaceData.clearCoatSmoothness = 0.0;
             }
 
+            void CalculateViewRay(float3 worldPos, out float3 rayOriginWorldSpace, out float3 rayDirWorldSpace)
+            {
+                // Viewer position, equivalent to _WorldSpaceCAmeraPos.xyz, but for the current view
+                float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
+                // View forward
+                float3 worldSpaceViewForward = -UNITY_MATRIX_I_V._m02_m12_m22;
+                // Calculate world space view ray direction and origin for perspective or orthographic
+                rayOriginWorldSpace = worldSpaceViewerPos;
+                rayDirWorldSpace = worldPos - rayOriginWorldSpace;
+                // Check if the current projection is orthographic
+                if (UNITY_MATRIX_P._m33 == 1.0)
+                {
+                    rayDirWorldSpace = worldSpaceViewForward * dot(rayDirWorldSpace, worldSpaceViewForward);
+                    rayOriginWorldSpace = worldPos - rayDirWorldSpace;
+                }
+            }
+
             float4 GetVoxelShadowCoord(VertexPositionInputs vertexInput)
             {
                 #if defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
@@ -187,7 +204,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float4 voxelColor;
                 float3 voxelNormal;
                 float3 voxelPosition;
-                
+
                 RaymarchVoxels(
                     rayOriginObjectSpace,
                     rayDirObjectSpace,
@@ -317,14 +334,21 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 Varyings output;
                 output.positionWS = TransformObjectToWorld(input.positionOS);
                 output.positionCS = TransformWorldToHClip(output.positionWS);
+
+                // https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/
+                #if UNITY_REVERSED_Z
+                output.positionCS.z = min(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
+                #else
+		        output.positionCS.z = max(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
+                #endif
+                
                 return output;
             }
 
             float Frag(Varyings input) : SV_Depth
             {
-                float3 rayDirWorldSpace;
-                float3 rayOriginWorldSpace;
-                CalculateViewRay(input.positionWS, rayOriginWorldSpace, rayDirWorldSpace);
+                float3 rayDirWorldSpace = -UNITY_MATRIX_I_V._m02_m12_m22;
+                float3 rayOriginWorldSpace = input.positionWS - rayDirWorldSpace;
 
                 float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
                 float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
@@ -334,7 +358,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float3 voxelNormal;
                 float3 voxelPosition;
                 float voxelDepth;
-                
+
                 RaymarchVoxels(
                     rayOriginObjectSpace,
                     rayDirObjectSpace,
