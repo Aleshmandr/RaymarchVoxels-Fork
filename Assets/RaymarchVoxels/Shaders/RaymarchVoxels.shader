@@ -5,7 +5,6 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
         [NoScaleOffset] _Voxels("Voxels", 3D) = "white" {}
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
         _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.0
-        [Gamma] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
         _SpecColor("Specular", Color) = (0.0, 0.0, 0.0)
         [ToggleOff] _SpecularHighlights("Specular Highlights", Float) = 1.0
         [HDR] _EmissionColor("Emission", Color) = (0,0,0)
@@ -231,7 +230,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
 
                 #ifdef _RECEIVE_SHADOWS
 
-                #if defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
+                #if defined(_MAIN_LIGHT_SHADOWS_SCREEN)
                 float4 shadowCoord = ComputeScreenPos(TransformObjectToHClip(voxelPosition));
                 #else
                 float3 biasedSC = ApplyShadowBias(voxelPositionWs, -voxelNormalWS, -_MainLightPosition.xyz);
@@ -243,11 +242,11 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 Light mainLight = GetMainLight();
                 #endif
 
-                half3 viewDirectionWS = SafeNormalize(worldSpaceViewerPos - positionWS);
+                half3 viewDirectionWS = SafeNormalize(worldSpaceViewerPos - voxelPositionWs);
 
                 // Mix diffuse GI with environment reflections.
                 half3 color = GlobalIllumination(brdfData, bakedGI, surfaceData.occlusion, voxelNormalWS,
-                                                 rayDirWorldSpace);
+                                                 viewDirectionWS);
 
                 // LightingPhysicallyBased computes direct light contribution.
                 color += LightingPhysicallyBased(brdfData, mainLight, voxelNormalWS, viewDirectionWS);
@@ -257,7 +256,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 for (int i = 0; i < additionalLightsCount; ++i)
                 {
                     Light light = GetAdditionalLight(i, voxelPositionWs);
-                    color += LightingPhysicallyBased(brdfData, light, voxelNormalWS, rayDirWorldSpace);
+                    color += LightingPhysicallyBased(brdfData, light, voxelNormalWS, viewDirectionWS);
                 }
                 #endif
 

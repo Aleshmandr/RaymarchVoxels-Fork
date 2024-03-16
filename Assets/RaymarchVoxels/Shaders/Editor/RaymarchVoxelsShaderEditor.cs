@@ -30,7 +30,7 @@ namespace RaymarchVoxels
         private void DrawSpecularProperties(Material material)
         {
             materialEditor.ColorProperty(specularColorProp, specularColorProp.displayName);
-            materialEditor.FloatProperty(smoothnessProp, smoothnessProp.displayName);
+            materialEditor.RangeProperty(smoothnessProp, smoothnessProp.displayName);
         }
         
         public void DrawSurfaceOptions(Material material)

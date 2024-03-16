@@ -5,7 +5,7 @@
 
 // Ray intersection with axis aligned box centered at the origin, with unit size
 // https://gist.github.com/DomNomNom/46bb1ce47f68d255fd5d
-float2 intersectAABB(float3 rayOrigin, float3 rayDir) {
+inline float2 intersectAABB(float3 rayOrigin, float3 rayDir) {
 	
     float3 tMin = (-0.5 - rayOrigin) / rayDir;
     float3 tMax = (0.5 - rayOrigin) / rayDir;
@@ -16,6 +16,19 @@ float2 intersectAABB(float3 rayOrigin, float3 rayDir) {
 	tNear = tNear < 0 ? 0 : tNear; // Clamp the tNear to the camera origin using ternary operator
 	return float2(tNear, tFar);
 };
+
+inline float EncodeDepthCS(float4 pos)
+{
+	float z = pos.z / pos.w;
+	#if defined(SHADER_API_GLCORE) || \
+		defined(SHADER_API_OPENGL) || \
+		defined(SHADER_API_GLES) || \
+		defined(SHADER_API_GLES3)
+	return z * 0.5 + 0.5;
+	#else 
+	return z;
+	#endif 
+}
 
 void RaymarchVoxels(float3 origin, float3 direction, UnityTexture3D voxels, out float4 color, out float3 normal, out float3 position, out float rawDepth)
 {
@@ -60,7 +73,14 @@ void RaymarchVoxels(float3 origin, float3 direction, UnityTexture3D voxels, out 
 		if (color.a > 0) {
 			position = (p + d*t)*voxelSize - 0.5;
 			float4 clipPosition = mul(UNITY_MATRIX_MVP, float4(position, 1.0));
-			rawDepth = clipPosition.z / clipPosition.w;
+			
+			#if UNITY_REVERSED_Z
+			clipPosition.z = min(clipPosition.z, clipPosition.w * UNITY_NEAR_CLIP_VALUE);
+			#else
+			clipPosition.z = max(clipPosition.z, clipPosition.w * UNITY_NEAR_CLIP_VALUE);
+			#endif
+
+			rawDepth = EncodeDepthCS(clipPosition);
 			return;
 		}
 
