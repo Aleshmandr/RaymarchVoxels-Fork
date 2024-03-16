@@ -2,10 +2,11 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
 {
     Properties
     {
+        [NoScaleOffset] _Voxels("Voxels", 3D) = "white" {}
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
-        _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
+        _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.0
         [Gamma] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
-        _SpecColor("Specular", Color) = (0.2, 0.2, 0.2)
+        _SpecColor("Specular", Color) = (0.0, 0.0, 0.0)
         [ToggleOff] _SpecularHighlights("Specular Highlights", Float) = 1.0
         [HDR] _EmissionColor("Emission", Color) = (0,0,0)
         _ReceiveShadows("Receive Shadows", Float) = 1.0
@@ -29,7 +30,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             }
 
             ZWrite On
-            Cull Back
+            Cull Front
 
             HLSLPROGRAM
             // Required to compile gles 2.0 with standard SRP library
@@ -101,26 +102,29 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             // LWRP Lit shader.
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
 
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+            #include "Assets/RaymarchVoxels/Shaders/RaymarchVoxels.hlsl"
+
+            TEXTURE3D(_Voxels);
+            SAMPLER(sampler_Voxels);
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
                 float4 tangentOS : TANGENT;
-                float2 uv : TEXCOORD0;
-                float2 uvLM : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
-                float2 uv : TEXCOORD0;
-                float2 uvLM : TEXCOORD1;
-                float4 positionWSAndFogFactor : TEXCOORD2; // xyz: positionWS, w: vertex fog factor
-                half3 normalWS : TEXCOORD3;
+                float4 positionWSAndFogFactor : TEXCOORD0; // xyz: positionWS, w: vertex fog factor
+                half3 normalWS : TEXCOORD1;
 
                 #ifdef _RECEIVE_SHADOWS
                 float4 shadowCoord : TEXCOORD6; // compute shadow coord per-vertex for the main light
                 #endif
+
                 float4 positionCS : SV_POSITION;
             };
 
@@ -141,8 +145,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 float fogFactor = ComputeFogFactor(vertexInput.positionCS.z);
 
                 // TRANSFORM_TEX is the same as the old shader library.
-                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.uvLM = input.uvLM.xy * unity_LightmapST.xy + unity_LightmapST.zw;
+                //output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
+                //output.uvLM = input.uvLM.xy * unity_LightmapST.xy + unity_LightmapST.zw;
 
                 output.positionWSAndFogFactor = float4(vertexInput.positionWS, fogFactor);
                 output.normalWS = vertexNormalInput.normalWS;
@@ -160,15 +164,12 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 return output;
             }
 
-            inline void InitializeSurfaceData(float2 uv, out SurfaceData outSurfaceData)
+            inline void InitializeSurfaceData(out SurfaceData outSurfaceData)
             {
-                outSurfaceData.alpha = _BaseColor.a;
-                half4 specGloss = half4(_SpecColor.rgb, _Smoothness);
-                
                 outSurfaceData.albedo = _BaseColor.rgb;
-                outSurfaceData.albedo = AlphaModulate(outSurfaceData.albedo, outSurfaceData.alpha);
+                outSurfaceData.alpha = _BaseColor.a;
 
-                outSurfaceData.metallic = half(1.0);
+                outSurfaceData.metallic = 1.0;
                 outSurfaceData.specular = _SpecColor.rgb;
 
                 outSurfaceData.smoothness = _Smoothness;
@@ -178,30 +179,49 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 #ifndef _EMISSION
                     outSurfaceData.emission = 0.0;
                 #else
-                    outSurfaceData.emission = _EmissionColor;;
+                outSurfaceData.emission = _EmissionColor;;
                 #endif
-                
-                outSurfaceData.clearCoatMask = half(0.0);
-                outSurfaceData.clearCoatSmoothness = half(0.0);
+
+                outSurfaceData.clearCoatMask = 0.0;
+                outSurfaceData.clearCoatSmoothness = 0.0;
             }
 
-            half4 Frag(Varyings input) : SV_Target
+            half4 Frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
             {
                 // Surface data contains albedo, metallic, specular, smoothness, occlusion, emission and alpha
                 // InitializeStandarLitSurfaceData initializes based on the rules for standard shader.
                 // You can write your own function to initialize the surface data of your shader.
                 SurfaceData surfaceData;
-                InitializeSurfaceData(input.uv, surfaceData);
+                InitializeSurfaceData(surfaceData);
 
-                half3 normalWS = input.normalWS;
+                float3 positionWS = input.positionWSAndFogFactor.xyz;
+                float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
+
+                float3 rayDirWorldSpace;
+                float3 rayOriginWorldSpace;
+                CalculateViewRay(positionWS, rayOriginWorldSpace, rayDirWorldSpace);
+
+                float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
+                float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
+
+                UnityTexture3D voxels = UnityBuildTexture3DStruct(_Voxels);
+                float4 voxelColor;
+                float3 voxelNormal;
+                float3 voxelPosition;
+                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition,
+                               outDepth);
+
+                surfaceData.albedo *= voxelColor.rgb;
+                surfaceData.emission *= voxelColor.rgb;
+
+                half3 normalWS = TransformObjectToWorldNormal(voxelNormal);
                 normalWS = normalize(normalWS);
 
                 // Samples SH fully per-pixel. SampleSHVertex and SampleSHPixel functions
                 // are also defined in case you want to sample some terms per-vertex.
                 half3 bakedGI = SampleSH(normalWS);
 
-                float3 positionWS = input.positionWSAndFogFactor.xyz;
-                half3 viewDirectionWS = SafeNormalize(GetCameraPositionWS() - positionWS);
+                //half3 viewDirectionWS = SafeNormalize(GetCameraPositionWS() - positionWS);
 
                 // BRDFData holds energy conserving diffuse and specular material reflections and its roughness.
                 // It's easy to plugin your own shading fuction. You just need replace LightingPhysicallyBased function
@@ -226,8 +246,11 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 Light mainLight = GetMainLight();
                 #endif
 
+                half3 viewDirectionWS = SafeNormalize(worldSpaceViewerPos - positionWS);
+                float3 voxelPositionWs = TransformObjectToWorld(voxelPosition);
+
                 // Mix diffuse GI with environment reflections.
-                half3 color = GlobalIllumination(brdfData, bakedGI, surfaceData.occlusion, normalWS, viewDirectionWS);
+                half3 color = GlobalIllumination(brdfData, bakedGI, surfaceData.occlusion, normalWS, rayDirWorldSpace);
 
                 // LightingPhysicallyBased computes direct light contribution.
                 color += LightingPhysicallyBased(brdfData, mainLight, normalWS, viewDirectionWS);
@@ -237,8 +260,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 int additionalLightsCount = GetAdditionalLightsCount();
                 for (int i = 0; i < additionalLightsCount; ++i)
                 {
-                    Light light = GetAdditionalLight(i, positionWS);
-                    color += LightingPhysicallyBased(brdfData, light, normalWS, viewDirectionWS);
+                    Light light = GetAdditionalLight(i, voxelPositionWs);
+                    color += LightingPhysicallyBased(brdfData, light, normalWS, rayDirWorldSpace);
                 }
                 #endif
 
@@ -249,14 +272,87 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             ENDHLSL
         }
 
-        // Used for rendering shadowmaps
-        UsePass "Universal Render Pipeline/Lit/ShadowCaster"
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags
+            {
+                "LightMode" = "ShadowCaster"
+            }
+
+            ZWrite On
+            ZTest LEqual
+            Cull Front
+
+            HLSLPROGRAM
+            #pragma shader_feature _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma multi_compile_instancing
+
+            #pragma prefer_hlslcc gles
+            #pragma exclude_renderers d3d11_9x
+            #pragma target 2.0
+
+            #pragma vertex Vert
+            #pragma fragment Frag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+            #include "Assets/RaymarchVoxels/Shaders/RaymarchVoxels.hlsl"
+
+            TEXTURE3D(_Voxels);
+            SAMPLER(sampler_Voxels);
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float3 positionWS : TEXCOORD0;
+                float4 positionCS : SV_POSITION;
+            };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
+                output.positionWS = vertexInput.positionWS;
+                output.positionCS = vertexInput.positionCS;
+                return output;
+            }
+
+            half4 Frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
+            {
+                float3 rayDirWorldSpace;
+                float3 rayOriginWorldSpace;
+                CalculateViewRay(input.positionWS, rayOriginWorldSpace, rayDirWorldSpace);
+
+                float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
+                float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
+
+                UnityTexture3D voxels = UnityBuildTexture3DStruct(_Voxels);
+                float4 voxelColor;
+                float3 voxelNormal;
+                float3 voxelPosition;
+                float voxelDepth;
+                RaymarchVoxels(rayOriginObjectSpace, rayDirObjectSpace, voxels, voxelColor, voxelNormal, voxelPosition,
+                               voxelDepth);
+
+                outDepth = voxelDepth;
+                return outDepth;
+            }
+            ENDHLSL
+        }
+
 
         // Used for depth prepass
         // If shadows cascade are enabled we need to perform a depth prepass. 
         // We also need to use a depth prepass in some cases camera require depth texture
         // (e.g, MSAA is enabled and we can't resolve with Texture2DMS
-        UsePass "Universal Render Pipeline/Lit/DepthOnly"
+        //UsePass "Universal Render Pipeline/Lit/DepthOnly"
     }
 
     CustomEditor "RaymarchVoxels.RaymarchVoxelsShaderEditor"

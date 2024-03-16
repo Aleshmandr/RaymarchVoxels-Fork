@@ -9,6 +9,7 @@ namespace RaymarchVoxels
         private MaterialEditor materialEditor;
         private MaterialProperty castShadowsProp;
         private MaterialProperty receiveShadowsProp;
+        private MaterialProperty textureProp;
         private MaterialProperty baseColorProp;
         private MaterialProperty smoothnessProp;
         private MaterialProperty specularColorProp;
@@ -34,6 +35,7 @@ namespace RaymarchVoxels
         
         public void DrawSurfaceOptions(Material material)
         {
+            materialEditor.TextureProperty(textureProp, textureProp.displayName);
             materialEditor.ColorProperty(baseColorProp, baseColorProp.displayName);
         }
 
@@ -68,9 +70,10 @@ namespace RaymarchVoxels
                 return;
             }
 
+            textureProp = FindProperty("_Voxels", properties, false);
+            baseColorProp = FindProperty("_BaseColor", properties, false);
             castShadowsProp = FindProperty("_CastShadows", properties, false);
             receiveShadowsProp = FindProperty("_ReceiveShadows", properties, false);
-            baseColorProp = FindProperty("_BaseColor", properties, false);
             smoothnessProp = FindProperty("_Smoothness", properties, false);
             specularColorProp = FindProperty("_SpecColor", properties, false);
             emissionColorProp = FindProperty("_EmissionColor", properties, false);
