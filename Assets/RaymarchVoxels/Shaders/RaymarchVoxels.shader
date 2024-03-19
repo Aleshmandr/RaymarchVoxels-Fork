@@ -341,7 +341,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 #else
 		        output.positionCS.z = max(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
                 #endif
-                
+
                 return output;
             }
 
@@ -370,6 +370,128 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
 
 
                 return voxelDepth;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags
+            {
+                "LightMode" = "DepthNormals"
+            }
+
+            ZWrite On
+            ZTest LEqual
+            Cull Off
+
+            ColorMask 0
+
+            HLSLPROGRAM
+            #pragma shader_feature _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma multi_compile_instancing
+
+            #pragma prefer_hlslcc gles
+            #pragma exclude_renderers d3d11_9x
+            #pragma target 2.0
+
+            #pragma vertex Vert
+            #pragma fragment Frag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+            #include "Assets/RaymarchVoxels/Shaders/RaymarchVoxels.hlsl"
+
+            TEXTURE3D(_Voxels);
+            SAMPLER(sampler_Voxels);
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float3 positionWS : TEXCOORD0;
+                float4 positionCS : SV_POSITION;
+            };
+
+            struct FragOutput
+            {
+                float4 normal : SV_Target;
+                float depth : SV_Depth;
+            };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+                output.positionWS = TransformObjectToWorld(input.positionOS);
+                output.positionCS = TransformWorldToHClip(output.positionWS);
+
+                // https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/
+                #if UNITY_REVERSED_Z
+                output.positionCS.z = min(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
+                #else
+		        output.positionCS.z = max(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
+                #endif
+
+                return output;
+            }
+
+            void CalculateViewRay(float3 worldPos, out float3 rayOriginWorldSpace, out float3 rayDirWorldSpace)
+            {
+                // Viewer position, equivalent to _WorldSpaceCAmeraPos.xyz, but for the current view
+                float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
+                // View forward
+                float3 worldSpaceViewForward = -UNITY_MATRIX_I_V._m02_m12_m22;
+                // Calculate world space view ray direction and origin for perspective or orthographic
+                rayOriginWorldSpace = worldSpaceViewerPos;
+                rayDirWorldSpace = worldPos - rayOriginWorldSpace;
+                // Check if the current projection is orthographic
+                if (UNITY_MATRIX_P._m33 == 1.0)
+                {
+                    rayDirWorldSpace = worldSpaceViewForward * dot(rayDirWorldSpace, worldSpaceViewForward);
+                    rayOriginWorldSpace = worldPos - rayDirWorldSpace;
+                }
+            }
+
+            FragOutput Frag(Varyings input)
+            {
+                 float3 positionWS = input.positionWS;
+
+                float3 rayDirWorldSpace;
+                float3 rayOriginWorldSpace;
+                CalculateViewRay(positionWS, rayOriginWorldSpace, rayDirWorldSpace);
+                
+                float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
+                float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
+
+                UnityTexture3D voxels = UnityBuildTexture3DStruct(_Voxels);
+                float4 voxelColor;
+                float3 voxelNormal;
+                float3 voxelPosition;
+                float voxelDepth;
+
+                RaymarchVoxels(
+                    rayOriginObjectSpace,
+                    rayDirObjectSpace,
+                    voxels,
+                    voxelColor,
+                    voxelNormal,
+                    voxelPosition,
+                    voxelDepth);
+
+                half3 voxelNormalWS = TransformObjectToWorldNormal(voxelNormal);
+                voxelNormalWS = normalize(voxelNormalWS);
+                
+                FragOutput o;
+                o.normal = float4(voxelNormalWS, 0.0);
+                o.depth = voxelDepth;
+
+                return o;
             }
             ENDHLSL
         }
