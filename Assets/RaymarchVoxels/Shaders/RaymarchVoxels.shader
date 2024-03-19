@@ -16,7 +16,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
     {
         Tags
         {
-            "RenderType" = "Opaque" "RenderPipeline" = "UniversalRenderPipeline" "IgnoreProjector" = "True"
+            "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline" "IgnoreProjector" = "True"
         }
         LOD 300
 
