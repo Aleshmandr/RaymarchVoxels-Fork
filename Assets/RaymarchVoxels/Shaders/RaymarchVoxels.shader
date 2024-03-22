@@ -102,7 +102,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
-            #include "Assets/RaymarchVoxels/Shaders/RaymarchVoxels.hlsl"
+            #include "../Shaders/RaymarchVoxels.hlsl"
+            #include "../Shaders/Camera.hlsl"
 
             TEXTURE3D(_Voxels);
             SAMPLER(sampler_Voxels);
@@ -156,23 +157,6 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 outSurfaceData.clearCoatSmoothness = 0.0;
             }
 
-            void CalculateViewRay(float3 worldPos, out float3 rayOriginWorldSpace, out float3 rayDirWorldSpace)
-            {
-                // Viewer position, equivalent to _WorldSpaceCAmeraPos.xyz, but for the current view
-                float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
-                // View forward
-                float3 worldSpaceViewForward = -UNITY_MATRIX_I_V._m02_m12_m22;
-                // Calculate world space view ray direction and origin for perspective or orthographic
-                rayOriginWorldSpace = worldSpaceViewerPos;
-                rayDirWorldSpace = worldPos - rayOriginWorldSpace;
-                // Check if the current projection is orthographic
-                if (UNITY_MATRIX_P._m33 == 1.0)
-                {
-                    rayDirWorldSpace = worldSpaceViewForward * dot(rayDirWorldSpace, worldSpaceViewForward);
-                    rayOriginWorldSpace = worldPos - rayDirWorldSpace;
-                }
-            }
-
             float4 GetVoxelShadowCoord(VertexPositionInputs vertexInput)
             {
                 #if defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
@@ -190,15 +174,15 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 SurfaceData surfaceData;
                 InitializeSurfaceData(surfaceData);
 
-                float3 positionWS = input.positionWSAndFogFactor.xyz;
-                float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
+                const float3 positionWS = input.positionWSAndFogFactor.xyz;
+                const float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
 
                 float3 rayDirWorldSpace;
                 float3 rayOriginWorldSpace;
                 CalculateViewRay(positionWS, rayOriginWorldSpace, rayDirWorldSpace);
 
-                float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
-                float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
+                const float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
+                const float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
 
                 UnityTexture3D voxels = UnityBuildTexture3DStruct(_Voxels);
                 float4 voxelColor;
@@ -312,7 +296,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
-            #include "Assets/RaymarchVoxels/Shaders/RaymarchVoxels.hlsl"
+            #include "../Shaders/RaymarchVoxels.hlsl"
 
             TEXTURE3D(_Voxels);
             SAMPLER(sampler_Voxels);
@@ -339,19 +323,19 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 #if UNITY_REVERSED_Z
                 output.positionCS.z = min(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
                 #else
-		        output.positionCS.z = max(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
+	            output.positionCS.z = max(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
                 #endif
-
+                
                 return output;
             }
 
             float Frag(Varyings input) : SV_Depth
             {
-                float3 rayDirWorldSpace = -UNITY_MATRIX_I_V._m02_m12_m22;
-                float3 rayOriginWorldSpace = input.positionWS - rayDirWorldSpace;
+                const float3 rayDirWorldSpace = -UNITY_MATRIX_I_V._m02_m12_m22;
+                const float3 rayOriginWorldSpace = input.positionWS - rayDirWorldSpace;
 
-                float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
-                float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
+                const float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
+                const float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
 
                 UnityTexture3D voxels = UnityBuildTexture3DStruct(_Voxels);
                 float4 voxelColor;
@@ -402,7 +386,8 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
-            #include "Assets/RaymarchVoxels/Shaders/RaymarchVoxels.hlsl"
+            #include "../Shaders/RaymarchVoxels.hlsl"
+            #include "../Shaders/Camera.hlsl"
 
             TEXTURE3D(_Voxels);
             SAMPLER(sampler_Voxels);
@@ -430,44 +415,19 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
                 Varyings output;
                 output.positionWS = TransformObjectToWorld(input.positionOS);
                 output.positionCS = TransformWorldToHClip(output.positionWS);
-
-                // https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/
-                #if UNITY_REVERSED_Z
-                output.positionCS.z = min(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
-                #else
-		        output.positionCS.z = max(output.positionCS.z, output.positionCS.w * UNITY_NEAR_CLIP_VALUE);
-                #endif
-
                 return output;
-            }
-
-            void CalculateViewRay(float3 worldPos, out float3 rayOriginWorldSpace, out float3 rayDirWorldSpace)
-            {
-                // Viewer position, equivalent to _WorldSpaceCAmeraPos.xyz, but for the current view
-                float3 worldSpaceViewerPos = UNITY_MATRIX_I_V._m03_m13_m23;
-                // View forward
-                float3 worldSpaceViewForward = -UNITY_MATRIX_I_V._m02_m12_m22;
-                // Calculate world space view ray direction and origin for perspective or orthographic
-                rayOriginWorldSpace = worldSpaceViewerPos;
-                rayDirWorldSpace = worldPos - rayOriginWorldSpace;
-                // Check if the current projection is orthographic
-                if (UNITY_MATRIX_P._m33 == 1.0)
-                {
-                    rayDirWorldSpace = worldSpaceViewForward * dot(rayDirWorldSpace, worldSpaceViewForward);
-                    rayOriginWorldSpace = worldPos - rayDirWorldSpace;
-                }
             }
 
             FragOutput Frag(Varyings input)
             {
-                 float3 positionWS = input.positionWS;
+                float3 positionWS = input.positionWS;
 
                 float3 rayDirWorldSpace;
                 float3 rayOriginWorldSpace;
                 CalculateViewRay(positionWS, rayOriginWorldSpace, rayDirWorldSpace);
-                
-                float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
-                float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
+
+                const float3 rayOriginObjectSpace = TransformWorldToObject(rayOriginWorldSpace);
+                const float3 rayDirObjectSpace = TransformWorldToObjectDir(rayDirWorldSpace);
 
                 UnityTexture3D voxels = UnityBuildTexture3DStruct(_Voxels);
                 float4 voxelColor;
@@ -486,7 +446,7 @@ Shader "Universal Render Pipeline/Custom/RaymarchVoxels"
 
                 half3 voxelNormalWS = TransformObjectToWorldNormal(voxelNormal);
                 voxelNormalWS = normalize(voxelNormalWS);
-                
+
                 FragOutput o;
                 o.normal = float4(voxelNormalWS, 0.0);
                 o.depth = voxelDepth;

@@ -72,14 +72,7 @@ void RaymarchVoxels(float3 origin, float3 direction, UnityTexture3D voxels, out 
 		color = voxels.Load(int4(v,0));
 		if (color.a > 0) {
 			position = (p + d*t)*voxelSize - 0.5;
-			float4 clipPosition = mul(UNITY_MATRIX_MVP, float4(position, 1.0));
-			
-			#if UNITY_REVERSED_Z
-			clipPosition.z = min(clipPosition.z, clipPosition.w * UNITY_NEAR_CLIP_VALUE);
-			#else
-			clipPosition.z = max(clipPosition.z, clipPosition.w * UNITY_NEAR_CLIP_VALUE);
-			#endif
-
+			const float4 clipPosition = mul(UNITY_MATRIX_MVP, float4(position, 1.0));
 			rawDepth = EncodeDepthCS(clipPosition);
 			return;
 		}
